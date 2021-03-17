@@ -132,12 +132,11 @@ function fixMetaData(directory) {
     });
 
     const metaDataFile = possibleMatches.find(file=> metaDataFiles.includes(file.toLowerCase()));
-    if(!metaDataFile) {
+    if(metaDataFile) {
+      matches.push({ file, metaDataFile });
+    } else {
       console.log(`Unable to locate the metadata file for ${file} file.`);
-      continue;
     }
-
-    matches.push({ file, metaDataFile });
   }
 
   if(mediaFiles.length !== matches.length) {
