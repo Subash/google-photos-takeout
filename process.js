@@ -16,7 +16,7 @@ function formatDate(date, options = {}) {
 function readFilesRecursively(directory) {
   if(!fs.existsSync(directory)) return [];
   const dirents = fs.readdirSync(directory, { withFileTypes: true });
-  return dirents.flatMap(dirent=> {
+  return dirents.flatMap((dirent)=> {
     const direntPath = path.resolve(directory, dirent.name);
     return dirent.isDirectory() ? readFilesRecursively(direntPath) : direntPath;
   });
@@ -54,7 +54,7 @@ function extractTakeouts() {
   const zips = files.filter(f=> f.startsWith('takeout') && f.endsWith('.zip'));
   if(!zips.length) return console.log('There are no Google Takeout zip files.');
 
-  zips.forEach(file=> {
+  zips.forEach((file)=> {
     const filePath = path.resolve(currentDir, file);
     const extractDir = filePath.replace(/\.zip$/, '');
     console.log(`Extracting ${file} to ${path.basename(extractDir)} directory.`);
@@ -69,7 +69,7 @@ function mergeTakeouts() {
 
   if(!takeouts.length) return console.log('There are no Google Takeout directories.');
 
-  takeouts.forEach(takeout=> {
+  takeouts.forEach((takeout)=> {
     const takeoutDir = path.resolve(currentDir, takeout.name);
     console.log(`Merging ${takeout.name} with ${path.basename(tmpMergeDir)}`);
     execSync(`rsync -av --crtimes --remove-source-files --exclude=".*" --backup --suffix="-${Date.now()}-duplicate" "${takeoutDir}/" "${tmpMergeDir}/"`);
@@ -79,12 +79,12 @@ function mergeTakeouts() {
 
 function renameRsyncBackups(directory) {
   const files = readFilesRecursively(directory);
-  const regx = /\-[0-9]+\-duplicate$/;
+  const regx = /-[0-9]+-duplicate$/;
   const backups = files.filter(file=> regx.test(file));
 
   if(!backups.length) return console.log(`There are no backup files created by rsync in ${path.basename(directory)} directory.`);
 
-  backups.forEach(file=> {
+  backups.forEach((file)=> {
     const [ suffix ] = regx.exec(file);
     const [, timestamp ] = suffix.split('-');
     const name = path.basename(file);
@@ -118,14 +118,14 @@ function fixMetaData(directory) {
       name.replace(/\(\d+\)/, d=> ext + d), // file(1).jpg -> file.jpg(1).json
       name.replace(/\(\d+\)/, '') + ext, // file(1).jpg -> file.json
     ]
-    .flatMap(name=> {
+    .flatMap((name)=> {
       return [
         name,
         name.replace(/\.jpg/i, '.heic'), // sometimes metadata for a .jpg file can be in a .heic.json file
         name.replace(/\.heic/i, '.jpg') // sometimes metadata for a .heic file can be in a .jpg.json file
       ];
     })
-    .map(name=> {
+    .map((name)=> {
       // Google Photos file names are never longer than 46 characters
       return path.resolve(path.dirname(file), `${name.substr(0, 46)}.json`);
     });
@@ -166,7 +166,7 @@ function mergePhotos() {
   const albums = dirents.filter(dirent=> dirent.isDirectory());
 
   // merging all at once can take a long time so merge album by album
-  albums.forEach(album=> {
+  albums.forEach((album)=> {
     const directory = path.resolve(tmpPhotosDir, album.name);
     const destDirectory = path.resolve(photosDir, album.name);
     console.log(`Merging ${album.name} with ${path.basename(photosDir)}`);
@@ -179,16 +179,16 @@ function deleteEmptyAlbums() {
   const dirents = fs.readdirSync(photosDir, { withFileTypes: true });
   const albums = dirents.filter(dirent=> dirent.isDirectory());
 
-  albums.forEach(album=> {
+  albums.forEach((album)=> {
     const directory = path.resolve(photosDir, album.name);
     const files = fs.readdirSync(directory)
-      .filter(name=> {
+      .filter((name)=> {
         if(name.startsWith('.')) return false;
         if(name.endsWith('.json')) return false;
         return true;
       });
 
-    // there should be files other than dotfiles and json files
+    // there should be files other than just dot and json files
     if(!files.length) {
       console.log(`Deleting empty ${album.name} directory.`);
       execSync(`rm -rf "${directory}"`);
