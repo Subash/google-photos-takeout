@@ -9,6 +9,19 @@ const photosDir = path.resolve(currentDir, 'Google Photos');
 const tmpMergeDir = path.resolve(currentDir, 'Temporary Merged Takeout');
 const tmpPhotosDir = path.resolve(tmpMergeDir, 'Takeout/Google Photos');
 
+function formatDate(date, options = {}) {
+  return new Intl.DateTimeFormat('en-US', options).format(date);
+}
+
+function readFilesRecursively(directory) {
+  if(!fs.existsSync(directory)) return [];
+  const dirents = fs.readdirSync(directory, { withFileTypes: true });
+  return dirents.flatMap(dirent=> {
+    const direntPath = path.resolve(directory, dirent.name);
+    return dirent.isDirectory() ? readFilesRecursively(direntPath) : direntPath;
+  });
+}
+
 function checkTools() {
   const rsyncInfo = execSync(`rsync --version`, { encoding: 'utf-8' });
   if(!rsyncInfo.startsWith('rsync  version 3')) {
@@ -29,10 +42,6 @@ function checkTools() {
     console.log('Install `p7zip` to continue.');
     process.exit(1);
   }
-}
-
-function formatDate(date, options = {}) {
-  return new Intl.DateTimeFormat('en-US', options).format(date);
 }
 
 function createPhotosDir() {
@@ -68,15 +77,6 @@ function mergeTakeouts() {
   });
 }
 
-function readFilesRecursively(directory) {
-  if(!fs.existsSync(directory)) return [];
-  const dirents = fs.readdirSync(directory, { withFileTypes: true });
-  return dirents.flatMap(dirent=> {
-    const direntPath = path.resolve(directory, dirent.name);
-    return dirent.isDirectory() ? readFilesRecursively(direntPath) : direntPath;
-  });
-}
-
 function renameRsyncBackups(directory) {
   const files = readFilesRecursively(directory);
   const regx = /\-[0-9]+\-duplicate$/;
@@ -95,69 +95,68 @@ function renameRsyncBackups(directory) {
   console.log(`Renamed ${backups.length} backup files created by rsync in ${path.basename(directory)} directory.`);
 }
 
-function updateDates(directory) {
-  const files = readFilesRecursively(directory);
-  const jsonFiles = files.filter(file=> file.endsWith('.json'));
-  const filesToUpdate = files.filter(file=> {
-    const name = path.basename(file);
-    if(name.startsWith('.')) return false;
-    if(name.endsWith('.json')) return false;
-    return true;
-  });
+function fixMetaData(directory) {
+  const files = readFilesRecursively(directory)
+    .filter(file=> !path.basename(file).startsWith('.'));
 
-  const filesWithMeta = [];
-  filesToUpdate.forEach(file=> {
-    const dir = path.dirname(file);
-    const name = path.basename(file);
-    const extension = path.extname(name);
-    const nameWithoutExtension = path.basename(file, extension);
-    const possibleMetadata = [
-      `${name}.json`,
-      `${nameWithoutExtension.replace('(1)', '')}${extension}(1).json`,
-      `${nameWithoutExtension.replace('(2)', '')}${extension}(2).json`,
-      `${nameWithoutExtension.replace('(3)', '')}${extension}(3).json`,
-      `${nameWithoutExtension.replace('(4)', '')}${extension}(4).json`,
-      `${nameWithoutExtension.replace('(5)', '')}${extension}(5).json`,
-      `${nameWithoutExtension.replace('(6)', '')}${extension}(6).json`,
-      `${nameWithoutExtension.replace('(7)', '')}${extension}(7).json`,
-      `${name.replace('(1)', '')}.json`,
-      `${name.replace('(2)', '')}.json`,
-      `${nameWithoutExtension.replace('-edited', '')}${extension}.json`,
-      `${nameWithoutExtension.replace('-edited', '')}${extension.toUpperCase()}.json`,
-      `${nameWithoutExtension.replace('-COLLAGE', '')}${extension}.json`,
-      `${nameWithoutExtension.replace('-COLLAGE', '')}${extension.toUpperCase()}.json`,
-      `${name.substr(0, 46)}.json`,
-      `${name.replace('(1)', '').substr(0, 46)}.json`,
-      `${name.replace('(2)', '').substr(0, 46)}.json`
-    ].map(name=> path.resolve(dir, name));
+  const mediaFiles = files
+    .filter(file=> !file.endsWith('.json'));
 
-    const metaFile = possibleMetadata.find(file=> jsonFiles.includes(file));
-    if(!metaFile) return console.log(`Unable to locate the metadata file for ${file} file.`);
-    filesWithMeta.push([file, metaFile]);
-  });
+  const metaDataFiles = files
+    .filter(file=> file.endsWith('.json'))
+    .map(file=> file.toLowerCase());
 
-  if(filesWithMeta.length !== filesToUpdate.length) {
-    console.log(`${filesToUpdate.length - filesWithMeta.length} files must have an accompanying metadata file to continue.`);
+  const matches = [];
+  for(const file of mediaFiles) {
+    const ext = path.extname(file);
+    const name = path.basename(file, ext);
+
+    const possibleMatches = [
+      name + ext, // file.jpg -> file.jpg.json
+      name.replace('-edited', '') + ext, // file-edited.jpg -> file.jpg.json
+      name.replace('-collage', '') + ext, // file-collage.jpg -> file.jpg.json
+      name.replace(/\(\d+\)/, d=> ext + d), // file(1).jpg -> file.jpg(1).json
+      name.replace(/\(\d+\)/, '') + ext, // file(1).jpg -> file.json
+    ]
+    .flatMap(name=> {
+      return [
+        name,
+        name.replace(/\.jpg/i, '.heic'), // sometimes metadata for a .jpg file can be in a .heic.json file
+        name.replace(/\.heic/i, '.jpg') // sometimes metadata for a .heic file can be in a .jpg.json file
+      ];
+    })
+    .map(name=> {
+      // Google Photos file names are never longer than 46 characters
+      return path.resolve(path.dirname(file), `${name.substr(0, 46)}.json`);
+    });
+
+    const metaDataFile = possibleMatches.find(file=> metaDataFiles.includes(file.toLowerCase()));
+    if(!metaDataFile) return console.log(`Unable to locate the metadata file for ${file} file.`);
+
+    matches.push({ file, metaDataFile });
+  }
+
+  if(mediaFiles.length != matches.length) {
+    console.log(`${mediaFiles.length - matches.length} files must have an accompanying metadata file to continue.`);
     return process.exit(1);
   }
 
-  filesWithMeta.forEach(([file, metaFile], index)=> {
-    const cdate = new Date(parseInt(JSON.parse(fs.readFileSync(metaFile, 'utf-8')).photoTakenTime.timestamp, 10) * 1000);
-
-    const creationDate = formatDate(cdate, { year: 'numeric', month: 'numeric', day: 'numeric' });
-    const creationTime = formatDate(cdate, { hour: 'numeric', hour12: false, minute: 'numeric', second: 'numeric' });
+  matches.forEach(({ file, metaDataFile }, index)=> {
+    const timeStampMs = new Date(parseInt(JSON.parse(fs.readFileSync(metaDataFile, 'utf-8')).photoTakenTime.timestamp, 10) * 1000);
+    const creationDate = formatDate(timeStampMs, { year: 'numeric', month: 'numeric', day: 'numeric' });
+    const creationTime = formatDate(timeStampMs, { hour: 'numeric', hour12: false, minute: 'numeric', second: 'numeric' });
 
     process.stdout.clearLine();
     process.stdout.cursorTo(0);
-    process.stdout.write(`Updating metadata of ${file}. ${index + 1} of ${filesWithMeta.length}.`);
+    process.stdout.write(`Updating metadata of ${file}. ${index + 1} of ${matches.length}.`);
 
     execSync(`SetFile -d "${creationDate} ${creationTime}" "${file}"`);
   });
 
-  if(filesWithMeta.length) {
+  if(matches.length) {
     process.stdout.clearLine();
     process.stdout.cursorTo(0);
-    process.stdout.write(`Updated metadata of ${filesWithMeta.length} files.\n`);
+    process.stdout.write(`Updated metadata of ${matches.length} files.\n`);
   }
 }
 
@@ -203,7 +202,7 @@ function deleteTmpMergeDir() {
   execSync(`rm -rf "${tmpMergeDir}"`);
 }
 
-function writeDate() {
+function stampDate() {
   const date = formatDate(new Date(), {
     year: 'numeric', month: 'long', day: 'numeric',
     hour: 'numeric', minute: 'numeric', second: 'numeric'
@@ -217,9 +216,9 @@ createPhotosDir();
 extractTakeouts();
 mergeTakeouts();
 renameRsyncBackups(tmpMergeDir);
-updateDates(tmpPhotosDir);
+fixMetaData(tmpPhotosDir);
 mergePhotos();
 renameRsyncBackups(photosDir);
 deleteEmptyAlbums();
 deleteTmpMergeDir();
-writeDate();
+stampDate();
