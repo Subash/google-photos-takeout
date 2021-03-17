@@ -122,7 +122,8 @@ function fixMetaData(directory) {
       return [
         name,
         name.replace(/\.jpg/i, '.heic'), // sometimes metadata for a .jpg file can be in a .heic.json file
-        name.replace(/\.heic/i, '.jpg') // sometimes metadata for a .heic file can be in a .jpg.json file
+        name.replace(/\.heic/i, '.jpg'), // sometimes metadata for a .heic file can be in a .jpg.json file
+        name.replace(/\.mov/i, '.heic'), // sometimes metadata for a iOS Live Photos .mov file can be in a .heic.json file
       ];
     })
     .map((name)=> {
@@ -131,12 +132,15 @@ function fixMetaData(directory) {
     });
 
     const metaDataFile = possibleMatches.find(file=> metaDataFiles.includes(file.toLowerCase()));
-    if(!metaDataFile) return console.log(`Unable to locate the metadata file for ${file} file.`);
+    if(!metaDataFile) {
+      console.log(`Unable to locate the metadata file for ${file} file.`);
+      continue;
+    }
 
     matches.push({ file, metaDataFile });
   }
 
-  if(mediaFiles.length != matches.length) {
+  if(mediaFiles.length !== matches.length) {
     console.log(`${mediaFiles.length - matches.length} files must have an accompanying metadata file to continue.`);
     return process.exit(1);
   }
